@@ -20,15 +20,15 @@ struct PopResult {
 };
 
 template <typename T>
-struct Vec {
+struct List {
 	size_t len = 0;
 	size_t cap = 0;
 	T* data = nullptr;
 	Allocator* allocator = nullptr;
 
 	/* General API */
-	// Never uses a linear allocator as is has to be able to grow...
-	// If a known size is required, use the Array<T> type
+	// Never uses a linear allocator as it has to be able to grow...
+	// If a fixed size is preferred with scratch allocation, use the Array<T> type
 	void init(size_t cap_) {
 		cap = cap_;
 		allocator = HEAP;
@@ -48,7 +48,7 @@ struct Vec {
 	}
     void reserve(size_t count) {
         len += count;
-        ASSERT(len <= cap, "Vec::alloc len + count > capacity");
+        ASSERT(len <= cap, "List::alloc len + count > capacity");
     }
     void zero() {
         memset(data + len, 0, cap - len);
@@ -100,7 +100,7 @@ struct Vec {
 	}
 	T& operator[](size_t i) {
 		if (i >= len) {
-		  std::cerr << "OUT OF BOUNDS ACCESS ON VEC " << data << "\n";
+		  std::cerr << "OUT OF BOUNDS ACCESS ON LIST " << data << "\n";
 		  exit(-1);
 		}
 		return data[i];

@@ -9,52 +9,55 @@
 #include "nlohmann/json.hpp"
 
 namespace Sol {
-namespace glTF {
+const int32_t GLTF_INVALID_INDEX = -1;
+const uint32_t GLTF_INVALID_COUNT = UINT32_MAX;
+const float GLTF_INVALID_FLOAT = std::numeric_limits<float>::max();
 
-const int32_t INVALID_INDEX = -1;
-const uint32_t INVALID_COUNT = UINT32_MAX;
-const float INVALID_FLOAT = std::numeric_limits<float>::max();
-
-const uint8_t PNG_BYTE_PATTERN[8] = {0x89, 0x50, 0x4E, 0x47,
+const uint8_t GLTF_PNG_BYTE_PATTERN[8] = {0x89, 0x50, 0x4E, 0x47,
                                      0x0D, 0x0A, 0x1A, 0x0A};
-const uint8_t JPG_BYTE_PATTERN[3] = {0xFF, 0xD8, 0xFF};
+const uint8_t GLTF_JPG_BYTE_PATTERN[3] = {0xFF, 0xD8, 0xFF};
 
-const int32_t NEAREST_FALLBACK = 9728;
-const int32_t LINEAR_FALLBACK = 9729;
+const int32_t GLTF_NEAREST_FALLBACK = 9728;
+const int32_t GLTF_LINEAR_FALLBACK = 9729;
 
-bool read_json(const char *file, Json *json)
+bool gltf_read_json(const char *file, nlohmann::json *json)
 {
     std::ifstream f(file);
     if (!f.is_open())
         return false;
 
-    *json = Json::parse(f);
+    *json = nlohmann::json::parse(f);
     f.close();
     return true;
 }
 
-void glTF::fill(Json json)
+bool glTF::get(const char* file_name, glTF *gltf)
 {
-    asset.fill(json);
-    scenes.fill(json);
-    nodes.fill(json);
-    buffers.fill(json);
-    buffer_views.fill(json);
-    accessors.fill(json);
-    meshes.fill(json);
-    skins.fill(json);
-    textures.fill(json);
-    images.fill(json);
-    samplers.fill(json);
-    materials.fill(json);
-    cameras.fill(json);
-    animations.fill(json);
+    nlohmann::json json;
+    bool ok = gltf_read_json(file_name, &json);
+    if (!ok)
+        return ok;
 
-    std::cout << "Alloced " <<  MemoryService::instance()->scratch_allocator.alloced << '\n';
+    gltf->asset.fill(json);
+    gltf->scenes.fill(json);
+    gltf->nodes.fill(json);
+    gltf->buffers.fill(json);
+    gltf->buffer_views.fill(json);
+    gltf->accessors.fill(json);
+    gltf->meshes.fill(json);
+    gltf->skins.fill(json);
+    gltf->textures.fill(json);
+    gltf->images.fill(json);
+    gltf->samplers.fill(json);
+    gltf->materials.fill(json);
+    gltf->cameras.fill(json);
+    gltf->animations.fill(json);
+
+    return ok;
 }
 
 namespace {
-template <typename T> static bool load_T(Json json, const char *key, T *obj)
+template <typename T> static bool load_T(nlohmann::json json, const char *key, T *obj)
 {
     auto tmp = json.find(key);
     if (tmp == json.end())
@@ -63,7 +66,7 @@ template <typename T> static bool load_T(Json json, const char *key, T *obj)
     *obj = tmp.value();
     return true;
 }
-static bool load_string(Json json, const char *key, StringBuffer *str)
+static bool load_string(nlohmann::json json, const char *key, StringBuffer *str)
 {
     auto obj = json.find(key);
     if (obj == json.end())
@@ -75,7 +78,7 @@ static bool load_string(Json json, const char *key, StringBuffer *str)
     return true;
 }
 template <typename T>
-static bool load_array(Json json, const char *key, Array<T> *array)
+static bool load_array(nlohmann::json json, const char *key, Array<T> *array)
 {
     auto obj = json.find(key);
     if (obj == json.end())
@@ -86,54 +89,27 @@ static bool load_array(Json json, const char *key, Array<T> *array)
     return true;
 }
 template <typename T>
-static void fill_obj_array(Json json, const char *key, Array<T> *array)
+static void fill_obj_array(nlohmann::json json, const char *key, Array<T> *array)
 {
-    for (auto i : json[key]) {
-        T t;
-        t.fill(i);
-        array->push(t);
+    uint32_t i = 0;
+    for (auto item : json[key]) {
+        (*array)[i].fill(item);
+        ++i;
     }
 }
-static void fill_str_array(Json json, const char *key,
+static void fill_str_array(nlohmann::json json, const char *key,
                            Array<StringBuffer> *array)
 {
     std::string str;
     for (auto i : json[key]) {
         str = i;
-        // Buf needs to be reconstructed every loop (new ptr to new allocation everytime)
-        StringBuffer buf = StringBuffer::get(str, str.length());
-        array->push(buf);
+        (*array)[i] = StringBuffer::get(str, str.length());
     }
-}
-
-// NOTE:: I am unsure if 'check' functions like this should be here...
-// I feel that really this should be checked when the model is being
-// used, it should not be checked upon serialisation...
-static bool check_joints_weights_count(Array<Mesh::Primitive::Attribute> *attrs)
-{
-    uint32_t count_w = 0;
-    uint32_t count_j = 0;
-    const char *w = "WEIGHTS";
-    const char *j = "JOINTS";
-    for (int i = 0; i < attrs->len; ++i) {
-        StringBuffer str = (*attrs)[i].key;
-        int w_check = memcmp(w, str.cstr(), 7);
-        int j_check = memcmp(j, str.cstr(), 6);
-
-        if (w_check == 0)
-            ++count_w;
-        if (j_check == 0)
-            ++count_j;
-    }
-    if (count_j != count_w)
-        return false;
-    else
-        return true;
 }
 } // namespace
 
 // Asset /////////////////////////
-void Asset::fill(Json json)
+void glTF::Asset::fill(nlohmann::json json)
 {
     auto asset = json.find("asset");
     ASSERT(asset != json.end(), "glTF has no 'asset' obj");
@@ -145,27 +121,30 @@ void Asset::fill(Json json)
 }
 
 // Scenes ///////////////////////
-void Scenes::fill(Json json)
+void glTF::Scenes::fill(nlohmann::json json)
 {
     load_T(json, "scene", &scene);
     load_array(json, "scenes", &scenes);
     fill_obj_array(json, "scenes", &scenes);
 }
-void Scene::fill(Json json)
+void glTF::Scene::fill(nlohmann::json json)
 {
     load_string(json, "name", &name);
     load_array(json, "nodes", &nodes);
-    for (auto i : json["nodes"])
-        nodes.push(i);
+    uint32_t i = 0;
+    for (auto item : json["nodes"]) {
+        nodes[i] = item;
+        ++i;
+    }
 }
 
 // Nodes ////////////////////////
-void Nodes::fill(Json json)
+void glTF::Nodes::fill(nlohmann::json json)
 {
     load_array(json, "nodes", &nodes);
     fill_obj_array(json, "nodes", &nodes);
 }
-void Node::fill(Json json)
+void glTF::Node::fill(nlohmann::json json)
 {
     load_string(json, "name", &name);
     load_T(json, "mesh", &mesh);
@@ -173,45 +152,61 @@ void Node::fill(Json json)
     load_T(json, "skin", &skin);
 
     load_array(json, "rotation", &rotation);
-    for (auto i : json["rotation"])
-        rotation.push(i);
+    uint32_t i = 0;
+    for (auto item : json["rotation"]) {
+        rotation[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
     load_array(json, "scale", &scale);
-    for (auto i : json["scale"])
-        scale.push(i);
+    for (auto item : json["scale"]) {
+        scale[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
     load_array(json, "translation", &translation);
-    for (auto i : json["translation"])
-        translation.push(i);
+    for (auto item : json["translation"]) {
+        translation[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
     load_array(json, "weights", &weights);
-    for (auto i : json["weights"])
-        weights.push(i);
-
+    for (auto item : json["weights"]) {
+        weights[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
     load_array(json, "matrix", &matrix);
-    for (auto i : json["matrix"])
-        matrix.push(i);
-
+    for (auto item : json["matrix"]) {
+        matrix[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
     load_array(json, "children", &children);
-    for (auto i : json["children"])
-        children.push(i);
+    for (auto item : json["children"]) {
+        children[i] = std::move(item);
+        ++i;
+    }
 }
 
 // Buffers & BufferViews //////////////////////
-void Buffers::fill(Json json)
+void glTF::Buffers::fill(nlohmann::json json)
 {
     load_array(json, "buffers", &buffers);
     fill_obj_array(json, "buffers", &buffers);
 }
-void Buffer::fill(Json json)
+void glTF::Buffer::fill(nlohmann::json json)
 {
     load_T(json, "byteLength", &byte_length);
     load_string(json, "uri", &uri);
 }
 
-void BufferViews::fill(Json json)
+void glTF::BufferViews::fill(nlohmann::json json)
 {
     load_array(json, "bufferViews", &views);
     fill_obj_array(json, "bufferViews", &views);
 }
-void BufferView::fill(Json json)
+void glTF::BufferView::fill(nlohmann::json json)
 {
     load_T(json, "buffer", &buffer);
     load_T(json, "byteLength", &byte_length);
@@ -221,19 +216,26 @@ void BufferView::fill(Json json)
 }
 
 // Accessors ///////////////////////
-void Accessors::fill(Json json)
+void glTF::Accessors::fill(nlohmann::json json)
 {
     load_array(json, "accessors", &accessors);
     fill_obj_array(json, "accessors", &accessors);
 }
-void Accessor::fill(Json json)
+void glTF::Accessor::fill(nlohmann::json json)
 {
     load_array(json, "max", &max);
-    for (auto i : json["max"])
-        max.push(i);
+    uint32_t i = 0;
+    for (auto item : json["max"]) {
+        max[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
     load_array(json, "min", &min);
-    for (auto i : json["min"])
-        min.push(i);
+    for (auto item : json["min"]) {
+        min[i] = std::move(item);
+        ++i;
+    }
+    i = 0;
 
     StringBuffer tmp;
     load_string(json, "type", &tmp);
@@ -257,58 +259,63 @@ void Accessor::fill(Json json)
     load_T(json, "count", &count);
     load_T(json, "bufferView", &buffer_view);
 
-    Json json_sparse;
+    nlohmann::json json_sparse;
     if (load_T(json, "sparse", &json_sparse)) {
         sparse.fill(json_sparse);
     }
 }
-void Accessor::Sparse::fill(Json json)
+void glTF::Accessor::Sparse::fill(nlohmann::json json)
 {
     load_T(json, "count", &count);
 
-    Json json_indices;
+    nlohmann::json json_indices;
     if (load_T(json, "indices", &json_indices)) {
         indices.fill(json_indices);
     }
-    Json json_values;
+    nlohmann::json json_values;
     if (load_T(json, "values", &json_values)) {
         values.fill(json_values);
     }
 }
-void Accessor::Sparse::Indices::fill(Json json)
+void glTF::Accessor::Sparse::Indices::fill(nlohmann::json json)
 {
     load_T(json, "bufferView", &buffer_view);
     load_T(json, "byteOffset", &byte_offset);
     load_T(json, "componentType", &component_type);
 }
-void Accessor::Sparse::Values::fill(Json json)
+void glTF::Accessor::Sparse::Values::fill(nlohmann::json json)
 {
     load_T(json, "bufferView", &buffer_view);
     load_T(json, "byteOffset", &byte_offset);
 }
 
 // Meshes ////////////////////
-void Meshes::fill(Json json)
+void glTF::Meshes::fill(nlohmann::json json)
 {
     load_array(json, "meshes", &meshes);
-    for (auto i : json["meshes"]) {
+    uint32_t i = 0;
+    for (auto item : json["meshes"]) {
         Mesh mesh;
-        mesh.fill(i);
-        meshes.push(mesh);
+        mesh.fill(item);
+        meshes[i] = std::move(mesh);
+        ++i;
     }
 }
-void Mesh::fill(Json json)
+void glTF::Mesh::fill(nlohmann::json json)
 {
     load_array(json, "primitives", &primitives);
     fill_obj_array(json, "primitives", &primitives);
 
     load_array(json, "weights", &weights);
-    for (auto i : json["weights"])
-        weights.push(i);
+    uint32_t i = 0;
+    for (auto item : json["weights"]) {
+        weights[i] = std::move(item);
+        ++i;
+    }
 
     extras.fill(json);
 }
-void Mesh::Primitive::fill(Json json)
+void glTF::Mesh::Primitive::fill(nlohmann::json json)
 {
     load_T(json, "indices", &indices);
     load_T(json, "material", &material);
@@ -318,67 +325,69 @@ void Mesh::Primitive::fill(Json json)
         fill_attrib_array(json["attributes"], &attributes);
     if (load_array(json, "targets", &targets))
         fill_obj_array(json, "targets", &targets);
-
-    bool check = check_joints_weights_count(&attributes);
-    ASSERT(check, "Primitive JOINTS_n count != WEIGHTS_n count");
 }
 
-void Mesh::Primitive::Target::fill(Json json)
+void glTF::Mesh::Primitive::Target::fill(nlohmann::json json)
 {
     attributes.init(json.size(), 8);
     if (attributes.cap)
         fill_attrib_array(json, &attributes);
 }
-void Mesh::Primitive::fill_attrib_array(Json json, Array<Attribute> *attributes)
+void glTF::Mesh::Primitive::fill_attrib_array(nlohmann::json json, Array<Attribute> *attributes)
 {
-    for (auto i : json.items()) {
+    uint32_t i = 0;
+    for (auto item : json.items()) {
         Attribute attrib;
-        std::string str = i.key();
+        std::string str = item.key();
         attrib.key = StringBuffer::get(str, str.length());
-        attrib.accessor = i.value();
-        attributes->push(attrib);
+        attrib.accessor = item.value();
+        (*attributes)[i] = std::move(attrib);
+        ++i;
     }
 }
-void Mesh::Extras::fill(Json json)
+void glTF::Mesh::Extras::fill(nlohmann::json json)
 {
     load_array(json, "targetNames", &target_names);
     fill_str_array(json, "targetNames", &target_names);
 }
 
 // Skins ////////////////////
-void Skins::fill(Json json)
+void glTF::Skins::fill(nlohmann::json json)
 {
     load_array(json, "skins", &skins);
     fill_obj_array(json, "skins", &skins);
 }
-void Skin::fill(Json json)
+void glTF::Skin::fill(nlohmann::json json)
 {
     load_T(json, "inverseBindMatrices", &i_bind_matrices);
     load_T(json, "skeleton", &skeleton);
     load_array(json, "joints", &joints);
-    for (auto i : json["joints"])
-        joints.push(i);
+    uint32_t i = 0;
+    for (auto item : json["joints"]) {
+        joints[i] = std::move(item);
+        ++i;
+    }
 }
 
 // Textures ////////////////
-void Textures::fill(Json json)
+void glTF::Textures::fill(nlohmann::json json)
 {
     load_array(json, "textures", &textures);
     fill_obj_array(json, "textures", &textures);
 }
-void Texture::fill(Json json)
+void glTF::Texture::fill(nlohmann::json json)
 {
     load_T(json, "sampler", &sampler);
     load_T(json, "source", &source);
 }
 
 // Images ////////////////
-void Images::fill(Json json)
+void glTF::Images::fill(nlohmann::json json)
 {
     load_array(json, "images", &images);
     fill_obj_array(json, "images", &images);
 }
-void Image::fill(Json json)
+void glTF::Image::fill(nlohmann::json json)
 {
     load_string(json, "uri", &uri);
     load_T(json, "bufferView", &buffer_view);
@@ -395,12 +404,12 @@ void Image::fill(Json json)
 }
 
 // Samplers //////////////
-void Samplers::fill(Json json)
+void glTF::Samplers::fill(nlohmann::json json)
 {
     load_array(json, "samplers", &samplers);
     fill_obj_array(json, "samplers", &samplers);
 }
-void Sampler::fill(Json json)
+void glTF::Sampler::fill(nlohmann::json json)
 {
     load_T(json, "magFilter", &mag_filter);
     load_T(json, "minFilter", &min_filter);
@@ -409,19 +418,21 @@ void Sampler::fill(Json json)
 }
 
 // Materials ///////////////////
-void Materials::fill(Json json)
+void glTF::Materials::fill(nlohmann::json json)
 {
     load_array(json, "materials", &materials);
     fill_obj_array(json, "materials", &materials);
 }
-void Material::fill(Json json)
+void glTF::Material::fill(nlohmann::json json)
 {
     load_string(json, "name", &name);
     load_T(json, "alphaCutoff", &alpha_cutoff);
     load_T(json, "doubleSided", &double_sided);
     load_array(json, "emissiveFactor", &emissive_factor);
-    for (auto i : json["emissiveFactor"])
-        emissive_factor.push(i);
+    uint32_t i = 0;
+    for (auto item : json["emissiveFactor"]) {
+        emissive_factor[i] = std::move(item);
+    }
 
     StringBuffer tmp;
     load_string(json, "alphaMode", &tmp);
@@ -437,7 +448,7 @@ void Material::fill(Json json)
     emissive_texture.fill_tex(json, "emissiveTexture");
     occlusion_texture.fill_tex(json, "occlusionTexture");
 }
-void Material::MatTexture::fill_tex(Json json, const char *key)
+void glTF::Material::MatTexture::fill_tex(nlohmann::json json, const char *key)
 {
     auto tmp = json.find(key);
     if (tmp == json.end())
@@ -450,7 +461,7 @@ void Material::MatTexture::fill_tex(Json json, const char *key)
     load_T(json, "index", &index);
     load_T(json, "texCoord", &tex_coord);
 }
-void Material::PbrMetallicRoughness::fill(Json json)
+void glTF::Material::PbrMetallicRoughness::fill(nlohmann::json json)
 {
     auto tmp = json.find("pbrMetallicRoughness");
     if (tmp == json.end())
@@ -459,8 +470,11 @@ void Material::PbrMetallicRoughness::fill(Json json)
         json = tmp.value();
 
     load_array(json, "baseColorFactor", &base_color_factor);
-    for (auto i : json["baseColorFactor"])
-        base_color_factor.push(i);
+    uint32_t i = 0;
+    for (auto item : json["baseColorFactor"]) {
+        base_color_factor[i] = std::move(item);
+        ++i;
+    }
     base_color_texture.fill_tex(json, "baseColorTexture");
     metallic_roughness_texture.fill_tex(json, "metallicRoughnessTexture");
     load_T(json, "metallicFactor", &metallic_factor);
@@ -468,12 +482,12 @@ void Material::PbrMetallicRoughness::fill(Json json)
 }
 
 // Cameras /////////////////////
-void Cameras::fill(Json json)
+void glTF::Cameras::fill(nlohmann::json json)
 {
     load_array(json, "cameras", &cameras);
     fill_obj_array(json, "cameras", &cameras);
 }
-void Camera::fill(Json json)
+void glTF::Camera::fill(nlohmann::json json)
 {
     load_string(json, "name", &name);
 
@@ -498,13 +512,13 @@ void Camera::fill(Json json)
         load_T(json["orthographic"], "zfar", &zfar);
         load_T(json["orthographic"], "znear", &znear);
 
-        ASSERT(xmag != INVALID_FLOAT,
+        ASSERT(xmag != GLTF_INVALID_FLOAT,
               "glTF model Ortho camera must have XMAG defined");
-        ASSERT(ymag != INVALID_FLOAT,
+        ASSERT(ymag != GLTF_INVALID_FLOAT,
               "glTF model Ortho camera must have YMAG defined");
-        ASSERT(zfar != INVALID_FLOAT,
+        ASSERT(zfar != GLTF_INVALID_FLOAT,
               "glTF model Ortho camera must have ZFAR defined");
-        ASSERT(znear != INVALID_FLOAT,
+        ASSERT(znear != GLTF_INVALID_FLOAT,
               "glTF model Ortho camera must have ZNEAR defined");
     }
     if (type == PERSPECTIVE) {
@@ -513,20 +527,20 @@ void Camera::fill(Json json)
         load_T(json["perspective"], "zfar", &zfar);
         load_T(json["perspective"], "znear", &znear);
 
-        ASSERT(yfov != INVALID_FLOAT,
+        ASSERT(yfov != GLTF_INVALID_FLOAT,
               "glTF model Perspective camera must have YFOV defined");
-        ASSERT(znear != INVALID_FLOAT,
+        ASSERT(znear != GLTF_INVALID_FLOAT,
               "glTF model Perspective camera must have ZNEAR defined");
     }
 }
 
 // Animations ////////////////////
-void Animations::fill(Json json)
+void glTF::Animations::fill(nlohmann::json json)
 {
     load_array(json, "animations", &animations);
     fill_obj_array(json, "animations", &animations);
 }
-void Animation::fill(Json json)
+void glTF::Animation::fill(nlohmann::json json)
 {
     load_string(json, "name", &name);
 
@@ -535,7 +549,7 @@ void Animation::fill(Json json)
     load_array(json, "samplers", &samplers);
     fill_obj_array(json, "samplers", &samplers);
 }
-void Animation::Channel::fill(Json json)
+void glTF::Animation::Channel::fill(nlohmann::json json)
 {
     load_T(json, "sampler", &sampler);
     load_T(json["target"], "node", &target.node);
@@ -551,7 +565,7 @@ void Animation::Channel::fill(Json json)
     if (strcmp(tmp.cstr(), "weights") == 0)
         target.path = Target::WEIGHTS;
 }
-void Animation::Sampler::fill(Json json)
+void glTF::Animation::Sampler::fill(nlohmann::json json)
 {
     load_T(json, "input", &input);
     load_T(json, "output", &output);
@@ -565,6 +579,4 @@ void Animation::Sampler::fill(Json json)
     if (strcmp(tmp.cstr(), "CUBICSPLINE") == 0)
         interpolation = CUBICSPLINE;
 }
-
-} // namespace glTF
 } // namespace Sol

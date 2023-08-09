@@ -2,7 +2,6 @@
 
 #include "Spv.hpp"
 #include "Assert.hpp"
-#include "Array.hpp"
 
 /*
  *  TODO:(Sol):

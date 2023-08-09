@@ -57,8 +57,9 @@ size_t StringBuffer::cstr_len(const char* cstr) {
 void StringBuffer::init(size_t size)
 {
     ASSERT(size > 0, "StringBuffer::init: size must be greater than 0");
-    str = reinterpret_cast<char*>(mem_alloca(size + 1, 1, alloc));
     cap = size;
+    alloc = SCRATCH;
+    str = reinterpret_cast<char*>(mem_alloca(cap + 1, 1, alloc));
 
     str[len] = '\0';
 }

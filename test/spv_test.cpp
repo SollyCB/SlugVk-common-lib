@@ -38,14 +38,14 @@ namespace Sol {
     static const bool SKIP = true;
 
     template<typename T>
-    static T* get_T(Vec<Spv::Type> types, int ptr_id) {
+    static T* get_T(List<Spv::Type> types, int ptr_id) {
         for(uint32_t i = 0; i < types.len; ++i) {
             if (types[i].id == ptr_id)
                 return reinterpret_cast<T*>(types[i].data);
         }
         return nullptr;
     }
-    static Spv::Type* get_parent(Vec<Spv::Type> types, int id) {
+    static Spv::Type* get_parent(List<Spv::Type> types, int id) {
         for(uint32_t i = 0; i < types.len; ++i) {
             if (types[i].id == id)
                 return &types[i];

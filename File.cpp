@@ -32,7 +32,6 @@ void *File::read_char(size_t *byte_count, const char *file_name, Allocator *allo
 
     if (!file) {
         std::cerr << "FAILED TO READ FILE " << file_name << "!\n";
-        fclose(file);
         return nullptr;
     }
 
@@ -47,5 +46,23 @@ void *File::read_char(size_t *byte_count, const char *file_name, Allocator *allo
 
     return buffer;
 }
+void *File::read_char(size_t *byte_count, const char *file_name) {
+    FILE *file = fopen(file_name, "r");
 
+    if (!file) {
+        std::cerr << "FAILED TO READ FILE " << file_name << "!\n";
+        return nullptr;
+    }
+
+    fseek(file, 0, SEEK_END);
+    *byte_count = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    void *buffer = malloc(*byte_count);
+    size_t read = fread(buffer, 1, *byte_count, file);
+    DEBUG_ASSERT(read == *byte_count, "Failed to read entire file");
+    fclose(file);
+
+    return buffer;
+}
 } // namespace Sol

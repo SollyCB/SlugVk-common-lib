@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <vulkan/vulkan.hpp>
 
-#include "Vec.hpp"
+#include "List.hpp"
 #include "Allocator.hpp"
 
 namespace Sol {
@@ -186,7 +186,7 @@ struct Spv {
 
     VkShaderStageFlagBits stage;
     const char* p_name = nullptr;
-    Vec<Type> types;
+    List<Type> types;
 
     static Spv parse(size_t code_size, const uint32_t *spirv, bool *ok);
 	void kill();

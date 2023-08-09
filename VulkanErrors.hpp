@@ -1,5 +1,5 @@
 #pragma once
-#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan.h>
 #include <iostream>
 
 namespace Sol {
@@ -15,7 +15,7 @@ struct VulkanError {
     const char* err_msg = (VulkanError::match_error(err_code)); \
     std::cerr << "OBJ CREATION ERROR: " << #creation_func << \
     " returned " << err_msg << ", (" << __FILE__ << ", " << __LINE__ << ")\n";  \
-    abort(); \
+    __builtin_trap(); \
   } 
 
 
