@@ -78,6 +78,12 @@ struct List {
 		data[len] = t;
 		++len;
 	}
+    T* to_append() {
+        if (len == cap)
+            grow();
+        ++len;
+        return data + len - 1;
+    }
 	void resize(size_t size) {
 		data = reinterpret_cast<T*>(mem_realloc(size * sizeof(T), len, data, 8, allocator));
 	}
