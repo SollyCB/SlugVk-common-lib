@@ -105,7 +105,6 @@ void *LinearAllocator::reallocate(size_t size, size_t cpy_size, void* ptr, size_
 }
 void LinearAllocator::deallocate(void* ptr) {
     ptr = nullptr;
-    alloced = 0;
 }
 
 void LinearAllocator::init(size_t size) {
@@ -118,9 +117,6 @@ void *LinearAllocator::allocate(size_t size, size_t alignment) {
   alloced += pad + size;
   ASSERT(alloced < cap, "Linear Allocator: Overflow");
   return ptr;
-}
-void LinearAllocator::cut(size_t size) {
-  alloced -= size;
 }
 void LinearAllocator::free() {
   alloced = 0;

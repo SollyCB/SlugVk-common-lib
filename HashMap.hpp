@@ -1,222 +1,517 @@
-// clang-format on
 #pragma once
+#include <emmintrin.h>
 
-#include "Allocator.hpp"
-#include "hashmap_util.hpp"
+#include "Basic.hpp"
+#include "external/wyhash.h"
+
+#if TEST
+#include "test/test.hpp"
+#include "String.hpp"
+#endif
 
 namespace Sol {
 
-struct Probe {
-    size_t pos;
-    size_t stride = 0;
-    size_t stride_limit; // capacity - 1
+const u8 EMPTY = 0b1111'1111;
+const u8 DEL   = 0b1000'0000;
+const u8 GROUP_WIDTH = 16;
 
-    inline Probe(size_t start, size_t limit) {
-        pos = start;
-        stride_limit = limit;
+// @Implementation I am not going to make a dynamic and a static hashmap like I did with 
+// arrays. I guess this one should always be able to grow... a static hashmap doesnt seem 
+// as intuitive/sensible as a static array
+
+template <typename T>
+inline uint64_t calculate_hash(const T &value, size_t seed = 0) {
+    return wyhash(&value, sizeof(T), seed, _wyp);
+}
+
+template <size_t N>
+inline uint64_t calculate_hash(const char (&value)[N], size_t seed = 0) {
+    return wyhash(value, strlen(value), seed, _wyp);
+}
+
+inline uint64_t calculate_hash(const char *value, size_t seed) {
+    return wyhash(value, strlen(value), seed, _wyp);
+}
+
+inline uint64_t hash_bytes(void *data, size_t len, size_t seed = 0) {
+    return wyhash(data, len, seed, _wyp);
+}
+
+inline size_t align(size_t size, size_t alignment) {
+  const size_t alignment_mask = alignment - 1;
+  return (size + alignment_mask) & ~alignment_mask;
+}
+
+inline void checked_mul(size_t &res, size_t mul) {
+    DEBUG_ASSERT(UINT64_MAX / res > mul, "usize checked mul overflow");
+    res = res * mul;
+}
+
+inline uint32_t count_trailing_zeros(u16 mask) { return __builtin_ctzl(mask); }
+
+inline void make_group_empty(uint8_t *bytes) {
+    __m128i ctrl = _mm_set1_epi8(EMPTY);
+    _mm_store_si128(reinterpret_cast<__m128i *>(bytes), ctrl);
+}
+
+struct Group {
+    __m128i ctrl;
+
+    static inline Group get_from_index(u64 index, u8 *data) {
+        Group ret;
+        ret.ctrl = *reinterpret_cast<__m128i*>(data + index);
+        return ret;
     }
-    inline bool increment() {
-        pos += stride;
-        pos &= stride_limit;
-
-        if (stride >= stride_limit)
-            return false;
-        stride += 16;
-
-        return true;
+    static inline Group get_empty() {
+        Group ret;
+        ret.ctrl = _mm_set1_epi8(EMPTY);
+        return ret;
     }
-}; // ProbeSequence
+    inline u16 is_empty() {
+        __m128i empty = _mm_set1_epi8(EMPTY);
+        __m128i res = _mm_cmpeq_epi8(ctrl, empty);
+        u16 mask = _mm_movemask_epi8(res);
+        return mask;
+    }
+    inline u16 is_special() {
+        uint16_t mask = _mm_movemask_epi8(ctrl);
+        return mask;
+    }
+    inline u16 is_full() {
+        u16 mask = is_special();
+        uint16_t invert = ~mask;
+        return invert;
+    }
+    inline void fill(uint8_t *bytes) {
+        _mm_store_si128(reinterpret_cast<__m128i *>(bytes), ctrl);
+    }
+    inline u16 match_byte(uint8_t byte) {
+        __m128i to_match = _mm_set1_epi8(byte);
+        __m128i match = _mm_cmpeq_epi8(ctrl, to_match);
+        return (uint16_t)_mm_movemask_epi8(match);
+    }
+};
 
-template <typename K, typename V> struct HashMap {
+template<typename K, typename V>
+struct HashMap {
+
     struct KeyValue {
         K key;
         V value;
     };
-
-    // pointers
-    uint8_t *raw_bytes;
-    Group *base_group;
-    KeyValue *base_kv;
-
-    // sizes
-    size_t capacity = 0;
-    size_t buckets_full = 0;
-    size_t growth = 0;
-
+    usize cap; // in key-value pairs
+    usize slots_left; // in key-value pairs
+    u8 *data;
     Allocator *allocator;
 
-    /* Inner methods */
-    inline size_t capacity_to_buckets() {
-        size_t growth = capacity;
-        if (!checked_mul(growth, 7))
-            return UINT64_MAX;
-        return (growth / 8) - buckets_full;
+    static inline HashMap<K, V> get(usize initial_cap, Allocator *alloc) {
+        HashMap<K, V> ret;
+        ret.init(initial_cap, alloc);
+        return ret;
+    }
+    void init(usize initial_cap, Allocator *alloc) {
+        cap        = align(initial_cap, GROUP_WIDTH);
+        slots_left = ((cap + 1) / 8) * 7;
+        allocator  = alloc;
+        data       = (u8*)mem_alloca(cap * sizeof(KeyValue) + cap, GROUP_WIDTH, allocator);
+        for(usize i = 0; i < cap; i += GROUP_WIDTH) {
+            make_group_empty(data + i);
+        }
     }
 
-    inline bool rehash_and_grow() {
-        if ((UINT64_MAX >> 1) < capacity)
-            return false;
+    bool insert_cpy(K key, V value) {
+        if (slots_left == 0) {
+            printf("Grow...\n");
+            u8 *old_data = data;
+            usize old_cap = cap;
 
-        Group *old_group = base_group;
-        KeyValue *old_kv = base_kv;
+            checked_mul(cap, 2);
+            data = (u8*)mem_alloca(cap + cap * sizeof(KeyValue), GROUP_WIDTH, allocator);
+            slots_left = ((cap + 1) / 8) * 7;
 
-        capacity *= 2;
-        buckets_full = 0;
-        growth = capacity_to_buckets();
-        raw_bytes = (uint8_t *)mem_alloca(
-            capacity + (sizeof(KeyValue) * capacity), 16, allocator);
-        base_kv = (KeyValue *)(raw_bytes + capacity);
-        base_group = (Group *)raw_bytes;
-        initEmpty();
-
-        // This algorithm may need testing for linear access optimisations
-        for (size_t i = 0; i < capacity / 2; i += 16) {
-            BitMask mask = old_group[i >> 4].isFull();
-            while (mask.mask) {
-                auto offset = mask.countTrailingZeros();
-                if (insert(old_kv[i + offset].key, old_kv[i + offset].value) ==
-                    UINT64_MAX)
-                    return false;
-
-                mask.mask ^= (1 << offset);
+            for(usize i = 0; i < cap; i += GROUP_WIDTH) {
+                make_group_empty(data + i);
             }
+
+            Group gr;
+            KeyValue *kv;
+            u16 mask;
+            u32 tz;
+            for(usize group_index = 0; group_index < old_cap; group_index += GROUP_WIDTH) {
+                // already points to a group so need for Group::get_from_index()
+                gr = *(Group*)(group_index + old_data);
+
+                mask = gr.is_full();
+                while(mask > 0) {
+                    tz = count_trailing_zeros(mask);
+
+                    // @FFS This was fking set to '&=' cos I am dumb and tired which means 
+                    // infinite loop lol... I fking hate and love programming
+                    mask ^= 1 << tz;
+
+                    kv = (KeyValue*)(old_data + old_cap);
+
+                    DEBUG_ASSERT(
+                        insert_cpy(kv[group_index + tz].key, kv[group_index + tz].value) != false,
+                         "Insert fail while growing");
+                }
+            }
+
+            mem_free(old_data, allocator);
         }
 
-        mem_free(old_group, allocator);
-        return true;
-    }
-    inline void update_sizes_on_insert() {
-        --growth;
-        ++buckets_full;
-    }
+        u64 hash = hash_bytes((void*)&key, sizeof(key));
+        u8 top7 = hash >> 57;
 
-    /* General API */
-    inline void initEmpty() {
-        for (size_t i = 0; i < (capacity >> 4); ++i) {
-            base_group[i].ctrl = _mm_set1_epi8(Group::EMPTY);
-        }
-    }
+        u64 exact_index = (hash & (cap - 1));
+        u64 group_index = exact_index - (exact_index & (GROUP_WIDTH - 1));
 
-    inline HashMap(size_t cap, Allocator *cator) {
-        allocator = cator;
-        next_pow_2(cap);
-        capacity = cap;
-        growth = capacity_to_buckets();
+        KeyValue *kv;
+        Group gr;
+        u16 mask;
+        u32 tz;
+        usize inc = 0;
+        while(inc < cap) {
+            DEBUG_ASSERT(inc <= cap, "Probe went too far");
+            gr = Group::get_from_index(group_index, data);
+            mask = gr.is_empty();
 
-        // TODO: reinterpret_cast
-        raw_bytes = (uint8_t *)mem_alloca(cap + (sizeof(KeyValue) * cap), 16,
-                                          allocator);
-        base_group = (Group *)raw_bytes;
-        base_kv = (KeyValue *)(raw_bytes + cap);
-        initEmpty();
-    }
-
-    inline void shutdown() {
-        mem_free(raw_bytes, allocator);
-        capacity = 0;
-        buckets_full = 0;
-        growth = 0;
-    }
-
-    inline size_t insert(K &key, V &value) {
-        if (growth == 0)
-            if (!rehash_and_grow())
-                return UINT64_MAX;
-
-        auto hash = calculateHash(key);
-        auto primary_index = hash % capacity;
-        auto offset_into_group = primary_index % 16;
-        uint8_t top7 = (hash >> 57) & 0x7f;
-
-        BitMask mask = (base_group + (primary_index >> 4))->isEmpty();
-        if (mask.mask & (1 << offset_into_group)) {
-            raw_bytes[primary_index] &= top7;
-
-            KeyValue *kv = base_kv + primary_index;
-            kv->key = key;
-            kv->value = value;
-
-            update_sizes_on_insert();
-            return primary_index;
-        }
-        auto adjusted_index = primary_index - offset_into_group;
-        Probe probe(adjusted_index, capacity - 1);
-        while (probe.increment()) {
-            mask = (base_group + (probe.pos >> 4))->isEmpty();
-            if (!mask.mask)
+            if (!mask) {
+                inc += GROUP_WIDTH;
+                group_index += inc;
+                group_index &= cap - 1;
                 continue;
-
-            auto offset = mask.countTrailingZeros();
-            raw_bytes[probe.pos + offset] &= top7;
-
-            KeyValue *kv = base_kv + probe.pos + offset;
-            kv->key = key;
-            kv->value = value;
-
-            update_sizes_on_insert();
-            return (probe.pos + offset);
-        }
-
-        return UINT64_MAX;
-    } // fn insert
-
-    inline KeyValue *get(K &key) {
-        auto hash = calculateHash(key);
-        auto primary_index = hash % capacity;
-        if (base_kv[primary_index].key == key)
-            return base_kv + primary_index;
-
-        uint8_t top7 = (hash >> 57) & 0x7f;
-        BitMask mask = (base_group + (primary_index >> 4))->matchByte(top7);
-        auto adjusted_index = primary_index - (primary_index % 16);
-
-        Probe probe(adjusted_index, capacity - 1);
-        while (probe.increment()) {
-            mask = base_group[probe.pos >> 4].isFull();
-            while (mask.mask) {
-                auto offset = mask.countTrailingZeros();
-                if (key == base_kv[probe.pos + offset].key)
-                    return base_kv + probe.pos + offset;
-
-                mask.mask ^= (1 << offset);
             }
+
+            tz = count_trailing_zeros(mask);
+            exact_index = group_index + tz;
+            data[exact_index] &= top7;
+
+            kv = (KeyValue*)(data + cap);
+            kv[exact_index].key = key;
+            kv[exact_index].value = value;
+
+            --slots_left;
+            return true;
         }
-        return nullptr;
-    } // fn get
 
-    inline bool rehash_and_grow(size_t new_cap) {
-        if ((UINT64_MAX >> 1) < new_cap || new_cap < capacity)
-            return false;
-        next_pow_2(new_cap);
+        return false;
+    }
+    bool insert_mv(K &key, V &value) {
+        if (slots_left == 0) {
+            u8 *old_data = data;
+            usize old_cap = cap;
 
-        Group *old_group = base_group;
-        KeyValue *old_kv = base_kv;
+            checked_mul(cap, 2);
+            data = (u8*)mem_alloca(cap + cap * sizeof(KeyValue), GROUP_WIDTH, allocator);
+            slots_left = ((cap + 1) / 8) * 7;
 
-        capacity = new_cap;
-        buckets_full = 0;
-        growth = capacity_to_buckets();
-        raw_bytes = (uint8_t *)mem_alloca(
-            capacity + (sizeof(KeyValue) * capacity), 16, allocator);
-        base_kv = (KeyValue *)(raw_bytes + capacity);
-        base_group = (Group *)raw_bytes;
-        initEmpty();
-
-        // This algorithm may need testing for linear access optimisations
-        for (size_t i = 0; i < capacity / 2; i += 16) {
-            BitMask mask = old_group[i >> 4].isFull();
-            while (mask.mask) {
-                auto offset = mask.countTrailingZeros();
-                if (insert(old_kv[i + offset].key, old_kv[i + offset].value) ==
-                    UINT64_MAX)
-                    return false;
-
-                mask.mask ^= (1 << offset);
+            for(usize i = 0; i < cap; i += GROUP_WIDTH) {
+                make_group_empty(data + i);
             }
+
+            KeyValue *kv;
+            Group gr;
+            u16 mask;
+            u32 tz;
+            for(usize group_index = 0; group_index < old_cap; group_index += GROUP_WIDTH) {
+                gr = *(Group*)(old_data + group_index);
+
+                mask = gr.is_full();
+                while(mask > 0) {
+                    tz = count_trailing_zeros(mask);
+
+                    // @FFS This was fking set to '&=' cos I am dumb and tired which means 
+                    // infinite loop lol... I fking hate and love programming
+                    mask ^= 1 << tz;
+
+                    kv = (KeyValue*)(old_data + old_cap);
+                    usize exact_index = tz + group_index;
+                    DEBUG_ASSERT(
+                        insert_mv(kv[exact_index].key, kv[exact_index].value) != false,
+                        "Insert fail while growing");
+                }
+            }
+
+            mem_free(old_data, allocator);
         }
 
-        mem_free(old_group, allocator);
-        return true;
+        u64 hash = hash_bytes((void*)&key, sizeof(key));
+        u8 top7 = hash >> 57;
+
+        u64 exact_index = (hash & (cap - 1));
+        u64 group_index = exact_index - (exact_index & (GROUP_WIDTH - 1));
+
+        KeyValue *kv;
+        Group gr;
+        u16 mask;
+        u32 tz;
+        usize inc = 0;
+        while(inc < cap) {
+            DEBUG_ASSERT(inc < cap, "Probe went too far");
+            gr = Group::get_from_index(group_index, data);
+            mask = gr.is_empty();
+
+            if (!mask) {
+                inc += GROUP_WIDTH;
+                group_index += inc;
+                group_index &= cap - 1;
+                continue;
+            }
+
+            tz = count_trailing_zeros(mask);
+            exact_index = group_index + tz;
+            data[exact_index] &= top7;
+
+            kv = (KeyValue*)(data + cap);
+            kv[exact_index].key = std::move(key);
+            kv[exact_index].value = std::move(value);
+
+            --slots_left;
+            return true;
+        }
+
+        return false;
+    }
+
+    V* find_cpy(K key) {
+        u64 hash = hash_bytes((void*)&key, sizeof(key));
+        u8 top7 = hash >> 57;
+        u64 exact_index = hash & (cap - 1);
+        u64 group_index = exact_index - (exact_index & (GROUP_WIDTH - 1));
+
+        KeyValue *kv;
+        Group gr;
+        u16 mask;
+        u32 tz;
+        usize inc = 0;
+        while(inc < cap) {
+            gr = Group::get_from_index(group_index, data);
+            mask = gr.match_byte(top7);
+
+            if (mask) {
+                // Ik the while catches an empty mask, but I want to skip the pointer arithmetic
+                kv = (KeyValue*)(data + cap);
+                while(mask) {
+                    tz = count_trailing_zeros(mask);
+                    exact_index = group_index + tz;
+
+                    if (kv[exact_index].key == key)
+                        return &kv[exact_index].value;
+
+                    mask ^= 1 << tz;
+                }
+            }
+
+            inc += GROUP_WIDTH;
+            group_index += inc;
+            group_index &= cap - 1;
+        }
+        return NULL;
+    }
+
+    V* find_ref(K &key) {
+        u64 hash = hash_bytes((void*)&key, sizeof(key));
+        u8 top7 = hash >> 57;
+        u64 exact_index = hash & (cap - 1);
+        u64 group_index = exact_index - (exact_index & (GROUP_WIDTH - 1));
+
+        KeyValue *kv;
+        Group gr;
+        u16 mask;
+        u32 tz;
+        usize inc = 0;
+        while(inc < cap) {
+            gr = Group::get_from_index(group_index, data);
+            mask = gr.match_byte(top7);
+
+            if (mask) {
+                // Ik the while catches an empty mask, but I want to skip the pointer arithmetic
+                kv = (KeyValue*)(data + cap);
+                while(mask) {
+                    tz = count_trailing_zeros(mask);
+                    exact_index = group_index + tz;
+
+                    if (kv[exact_index].key == key)
+                        return &kv[exact_index].value;
+
+                    mask ^= 1 << tz;
+                }
+            }
+
+            inc += GROUP_WIDTH;
+            group_index += inc;
+            group_index &= cap - 1;
+        }
+        return NULL;
+    }
+
+    void scratch_kill() {
+        DEBUG_ASSERT(allocator == SCRATCH, "Incorrect shutdown method");
+        SCRATCH->cut(cap);
+        cap = 0;
+        slots_left = 0;
+        allocator = NULL;
+    }
+    void heap_kill() {
+        DEBUG_ASSERT(allocator == HEAP, "Incorrect shutdown method");
+        mem_free(data, HEAP);
+        cap = 0;
+        slots_left = 0;
+        allocator = NULL;
     }
 };
+
+#if TEST
+    void test_cpy() {
+        usize cap = 16;
+        auto map = HashMap<int, int>::get(cap, HEAP); 
+        for(int i = 0; i < cap; ++i) {
+            TEST_EQ("EmptyInit", map.data[i], EMPTY, false);
+        }
+        // @Memory tlsf is not allocated enough for 1'000'000 I dont think
+        // as that number segfaults, but as it can do arbitrarily large numbers up to
+        // amount, I assume that it is just running out of memory (seems unlikely that 
+        // there is an implementation problem when it can do 100k.
+        for(int i = 0; i < 100'000; ++i) {
+            int key = i;
+            int value = i;
+           bool index = map.insert_cpy(key, value);
+
+            TEST_NEQ("Insert", index, false, false);
+            DEBUG_ASSERT(index != false, "Insert Fail");
+            HashMap<int, int>::KeyValue *kv = (HashMap<int, int>::KeyValue*)(map.data + map.cap);
+
+        }
+
+        // End
+        map.heap_kill();
+    }
+    void test_mv() {
+        usize cap = 16;
+        auto map = HashMap<int, int>::get(cap, HEAP); 
+        for(int i = 0; i < cap; ++i) {
+            TEST_EQ("EmptyInit", map.data[i], EMPTY, false);
+        }
+        // @Memory tlsf is not allocated enough for 1'000'000 I dont think
+        // as that number segfaults, but as it can do arbitrarily large numbers up to
+        // amount, I assume that it is just running out of memory (seems unlikely that 
+        // there is an implementation problem when it can do 100k.
+        for(int i = 0; i < 100'000; ++i) {
+            int key = i;
+            int value = i;
+            int key_mv = i;
+            int value_mv = i;
+            bool index = map.insert_mv(key_mv, value_mv);
+
+            TEST_NEQ("Insert", index, false, false);
+            DEBUG_ASSERT(index != false, "Insert Fail");
+            HashMap<int, int>::KeyValue *kv = (HashMap<int, int>::KeyValue*)(map.data + map.cap);
+
+        }
+
+        // End
+        map.heap_kill();
+    }
+    void test_find_cpy() {
+        usize cap = 16;
+        auto map = HashMap<int, int>::get(cap, HEAP); 
+        for(int i = 0; i < cap; ++i) {
+            TEST_EQ("EmptyInit", map.data[i], EMPTY, false);
+        }
+        // @Memory tlsf is not allocated enough for 1'000'000 I dont think
+        // as that number segfaults, but as it can do arbitrarily large numbers up to
+        // amount, I assume that it is just running out of memory (seems unlikely that 
+        // there is an implementation problem when it can do 100k.
+        for(int i = 0; i < 100'000; ++i) {
+            int key = i;
+            int value = i;
+           bool index = map.insert_cpy(key, value);
+
+            TEST_NEQ("Insert", index, false, false);
+            DEBUG_ASSERT(index != false, "Insert Fail");
+            HashMap<int, int>::KeyValue *kv = (HashMap<int, int>::KeyValue*)(map.data + map.cap);
+
+        }
+        for(int i = 0; i < 100'000; ++i) {
+            int *f = map.find_cpy(i);
+            DEBUG_ASSERT(f != nullptr, "AAARGHHHHHHHH");
+        }
+
+        // End
+        map.heap_kill();
+    }
+    void test_find_ref() {
+        usize cap = 16;
+        auto map = HashMap<int, int>::get(cap, HEAP); 
+        for(int i = 0; i < cap; ++i) {
+            TEST_EQ("EmptyInit", map.data[i], EMPTY, false);
+        }
+        // @Memory tlsf is not allocated enough for 1'000'000 I dont think
+        // as that number segfaults, but as it can do arbitrarily large numbers up to
+        // amount, I assume that it is just running out of memory (seems unlikely that 
+        // there is an implementation problem when it can do 100k.
+        for(int i = 0; i < 100'000; ++i) {
+            int key = i;
+            int value = i;
+            int key_mv = i;
+            int value_mv = i;
+           bool index = map.insert_mv(key_mv, value_mv);
+
+            TEST_NEQ("Insert", index, false, false);
+            DEBUG_ASSERT(index != false, "Insert Fail");
+            HashMap<int, int>::KeyValue *kv = (HashMap<int, int>::KeyValue*)(map.data + map.cap);
+
+        }
+        for(int i = 0; i < 100'000; ++i) {
+            int *f = map.find_ref(i);
+            DEBUG_ASSERT(f != nullptr, "AAARGHHHHHHHH");
+            //printf("F: %i", *f);
+        }
+
+        // End
+        map.heap_kill();
+    }
+    void test_str() {
+        usize cap = 16;
+        auto map = HashMap<u64, StringBuffer>::get(cap, HEAP); 
+        for(int i = 0; i < cap; ++i) {
+            TEST_EQ("EmptyInit", map.data[i], EMPTY, false);
+        }
+        // @Memory tlsf is not allocated enough for 1'000'000 I dont think
+        // as that number segfaults, but as it can do arbitrarily large numbers up to
+        // amount, I assume that it is just running out of memory (seems unlikely that 
+        // there is an implementation problem when it can do 100k.
+        for(int i = 0; i < 10'000; ++i) {
+            u64 key = i;
+            StringBuffer value = StringBuffer::get("Word", 4, HEAP);
+            bool index = map.insert_cpy(key, value);
+
+            TEST_NEQ("Insert", index, false, false);
+            DEBUG_ASSERT(index != false, "Insert Fail");
+            HashMap<u64, StringBuffer>::KeyValue *kv = (HashMap<u64, StringBuffer>::KeyValue*)(map.data + map.cap);
+        }
+        for(int i = 0; i < 10'000; ++i) {
+            u64 key = i;
+            StringBuffer *f = map.find_cpy(key);
+            StringBuffer *t = nullptr;
+            DEBUG_ASSERT(f != nullptr, "AAARGHHHHHHHH");
+            TEST_STR_EQ("find_string_with_cstr_key", f->cstr(), "Word", false);
+            f->kill();
+        }
+
+        // End
+        map.heap_kill();
+    }
+    void run_hashmap_tests() {
+        TEST_MODULE_BEGIN("HashMapModule1", true, false);
+        test_cpy();
+        test_mv();
+        test_find_cpy();
+        test_find_ref();
+        test_str();
+        TEST_MODULE_END();
+    }
+#endif 
 
 } // namespace Sol

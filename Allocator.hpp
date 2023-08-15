@@ -67,12 +67,14 @@ struct LinearAllocator : public Allocator {
   size_t alloced = 0;
 
   void init(size_t size);
-  void cut(size_t size);
   void free();
   void kill();
 
   inline size_t get_mark() {
       return alloced;
+  }
+  inline void cut(size_t size) {
+    alloced -= size;
   }
   inline void cut_diff(size_t mark) {
       if (alloced > mark)

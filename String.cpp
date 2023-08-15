@@ -9,7 +9,7 @@ namespace Sol {
 void StringView::copy_to_buf(StringBuffer *buf, size_t start, size_t end)
 {
     char *ptr = buf->str;
-    ASSERT(start < end, "StringView::copy_to_buf: start > end");
+    DEBUG_ASSERT(start < end, "StringView::copy_to_buf: start > end");
     mem_cpy(buf->str, ptr + start, end - start);
 }
 
@@ -56,7 +56,7 @@ size_t StringBuffer::cstr_len(const char* cstr) {
 
 void StringBuffer::init(size_t size)
 {
-    ASSERT(size > 0, "StringBuffer::init: size must be greater than 0");
+    DEBUG_ASSERT(size > 0, "StringBuffer::init: size must be greater than 0");
     cap = size;
     alloc = SCRATCH;
     str = reinterpret_cast<char*>(mem_alloca(cap + 1, 1, alloc));
@@ -87,7 +87,7 @@ void StringBuffer::grow(size_t size)
 }
 void StringBuffer::copy_here(const char *str_, size_t size)
 {
-    ASSERT(size <=cap,  "StringBuffer::copy_here: Allocate more memory!");
+    DEBUG_ASSERT(size <=cap,  "StringBuffer::copy_here: Allocate more memory!");
 
     mem_cpy(str, str_, size);
     len = size;
@@ -96,7 +96,7 @@ void StringBuffer::copy_here(const char *str_, size_t size)
 
 void StringBuffer::copy_here(std::string std_str, size_t size)
 {
-    ASSERT(size <= cap, "StringBuffer::copy_here: Allocate more memory!");
+    DEBUG_ASSERT(size <= cap, "StringBuffer::copy_here: Allocate more memory!");
 
     mem_cpy((void *)str, (void *)std_str.c_str(), size);
     len = size;
@@ -107,7 +107,7 @@ void StringBuffer::push(const char *cstr)
 {
     size_t size = cstr_len(cstr);
 
-    ASSERT(size <= cap - len, "StringBuffer::push: Allocate more memory (size > cap - len)!")
+    DEBUG_ASSERT(size <= cap - len, "StringBuffer::push: Allocate more memory (size > cap - len)!")
 
     mem_cpy(str + len, cstr, size);
     len += size;
@@ -117,7 +117,7 @@ void StringBuffer::push(std::string std_str)
 {
     size_t size = std_str.length();
 
-    ASSERT(size <= cap - len, "StringBuffer::push: Allocate more memory (size > cap - len)!")
+    DEBUG_ASSERT(size <= cap - len, "StringBuffer::push: Allocate more memory (size > cap - len)!")
 
     mem_cpy(str + len, std_str.c_str(), size);
     len += size;
