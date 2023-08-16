@@ -99,6 +99,46 @@ struct HashMap {
         K key;
         V value;
     };
+
+    struct Iter {
+        usize current_pos;
+        HashMap<K, V> *map;
+
+        KeyValue* next() {
+			u8 pos_in_group;
+			u16 mask;
+			u32 tz;
+			usize group_index;
+			Group gr;
+			KeyValue *kv;
+			while(current_pos < map->cap) {
+
+				pos_in_group = current_pos & (GROUP_WIDTH - 1);
+				group_index = current_pos - pos_in_group;
+
+				gr = *(Group*)(map->data + group_index);
+				mask = gr.is_full();
+				mask >>= pos_in_group;
+
+				if (mask) {
+					tz = count_trailing_zeros(mask);
+					current_pos += tz;
+					kv = (KeyValue*)(map->data + map->cap + (current_pos * sizeof(KeyValue)));
+
+					++current_pos;
+					return kv;
+				}
+
+				current_pos += GROUP_WIDTH - pos_in_group;
+			}
+			return NULL;
+        }
+    };
+    Iter iter() {
+        Iter ret = {0, this};
+        return ret;
+    };
+
     usize cap; // in key-value pairs
     usize slots_left; // in key-value pairs
     u8 *data;
@@ -138,8 +178,7 @@ struct HashMap {
             u16 mask;
             u32 tz;
             for(usize group_index = 0; group_index < old_cap; group_index += GROUP_WIDTH) {
-                // already points to a group so need for Group::get_from_index()
-                gr = *(Group*)(group_index + old_data);
+                gr = Group::get_from_index(group_index, old_data);
 
                 mask = gr.is_full();
                 while(mask > 0) {
@@ -503,6 +542,28 @@ struct HashMap {
         // End
         map.heap_kill();
     }
+    void test_iter() {
+        usize cap = 16;
+        auto map = HashMap<int, int>::get(cap, HEAP); 
+
+        for(int i = 0; i < 100; ++i) {
+            map.insert_cpy(i, i);
+        }
+
+        auto iter = map.iter();
+
+        auto *kv = iter.next();
+		int count = 0;
+        while(kv) {
+			TEST_EQ("Iter_Key_eq_Val", kv->key, kv->value, false);
+            kv = iter.next();
+			++count;
+        }
+		TEST_EQ("all_items_returned", count, 100, false);
+
+        // End
+        map.heap_kill();
+    }
     void run_hashmap_tests() {
         TEST_MODULE_BEGIN("HashMapModule1", true, false);
         test_cpy();
@@ -510,6 +571,7 @@ struct HashMap {
         test_find_cpy();
         test_find_ref();
         test_str();
+        test_iter();
         TEST_MODULE_END();
     }
 #endif 
