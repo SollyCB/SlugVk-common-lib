@@ -1,0 +1,9 @@
+#!/usr/bin/bash
+
+set -xe
+
+if [[ $1 != '' ]]; then
+	spirv-dis test_spirv.$1.spv	
+else
+	spirv-dis test_spirv.vert.spv	
+fi

@@ -9,6 +9,8 @@
 #include "String.hpp"
 #endif
 
+// Probably should overload the insert functions so that value can be a ptr, while key is copied
+
 namespace Sol {
 
 const u8 EMPTY = 0b1111'1111;
@@ -161,7 +163,6 @@ struct HashMap {
 
     bool insert_cpy(K key, V value) {
         if (slots_left == 0) {
-            printf("Grow...\n");
             u8 *old_data = data;
             usize old_cap = cap;
 
@@ -190,9 +191,7 @@ struct HashMap {
 
                     kv = (KeyValue*)(old_data + old_cap);
 
-                    DEBUG_ASSERT(
-                        insert_cpy(kv[group_index + tz].key, kv[group_index + tz].value) != false,
-                         "Insert fail while growing");
+                    DEBUG_ASSERT(insert_cpy(kv[group_index + tz].key , kv[group_index + tz].value) != false, "Insert fail while growing");
                 }
             }
 
@@ -236,7 +235,10 @@ struct HashMap {
 
         return false;
     }
-    bool insert_mv(K &key, V &value) {
+    bool insert_ptr(K *key, V *value) {
+		DEBUG_ASSERT(key != nullptr, "pass key == nullptr to HashMap::insert_ptr");
+		DEBUG_ASSERT(value != nullptr, "pass value == nullptr to HashMap::insert_ptr");
+
         if (slots_left == 0) {
             u8 *old_data = data;
             usize old_cap = cap;
@@ -267,7 +269,7 @@ struct HashMap {
                     kv = (KeyValue*)(old_data + old_cap);
                     usize exact_index = tz + group_index;
                     DEBUG_ASSERT(
-                        insert_mv(kv[exact_index].key, kv[exact_index].value) != false,
+                        insert_ptr(&kv[exact_index].key, &kv[exact_index].value) != false,
                         "Insert fail while growing");
                 }
             }
@@ -275,7 +277,7 @@ struct HashMap {
             mem_free(old_data, allocator);
         }
 
-        u64 hash = hash_bytes((void*)&key, sizeof(key));
+        u64 hash = hash_bytes((void*)key, sizeof(*key));
         u8 top7 = hash >> 57;
 
         u64 exact_index = (hash & (cap - 1));
@@ -303,8 +305,8 @@ struct HashMap {
             data[exact_index] &= top7;
 
             kv = (KeyValue*)(data + cap);
-            kv[exact_index].key = std::move(key);
-            kv[exact_index].value = std::move(value);
+            kv[exact_index].key = *key;
+            kv[exact_index].value = *value;
 
             --slots_left;
             return true;
@@ -349,8 +351,10 @@ struct HashMap {
         return NULL;
     }
 
-    V* find_ref(K &key) {
-        u64 hash = hash_bytes((void*)&key, sizeof(key));
+    V* find_ptr(K *key) {
+		DEBUG_ASSERT(key != nullptr, "pass key == nullptr to HashMap::find_ptr");
+
+        u64 hash = hash_bytes((void*)key, sizeof(*key));
         u8 top7 = hash >> 57;
         u64 exact_index = hash & (cap - 1);
         u64 group_index = exact_index - (exact_index & (GROUP_WIDTH - 1));
@@ -371,7 +375,7 @@ struct HashMap {
                     tz = count_trailing_zeros(mask);
                     exact_index = group_index + tz;
 
-                    if (kv[exact_index].key == key)
+                    if (kv[exact_index].key == *key)
                         return &kv[exact_index].value;
 
                     mask ^= 1 << tz;
@@ -399,10 +403,11 @@ struct HashMap {
         slots_left = 0;
         allocator = NULL;
     }
-};
+
+
 
 #if TEST
-    void test_cpy() {
+    static void test_cpy() {
         usize cap = 16;
         auto map = HashMap<int, int>::get(cap, HEAP); 
         for(int i = 0; i < cap; ++i) {
@@ -426,7 +431,7 @@ struct HashMap {
         // End
         map.heap_kill();
     }
-    void test_mv() {
+    static void test_ptr() {
         usize cap = 16;
         auto map = HashMap<int, int>::get(cap, HEAP); 
         for(int i = 0; i < cap; ++i) {
@@ -441,7 +446,7 @@ struct HashMap {
             int value = i;
             int key_mv = i;
             int value_mv = i;
-            bool index = map.insert_mv(key_mv, value_mv);
+            bool index = map.insert_ptr(&key_mv, &value_mv);
 
             TEST_NEQ("Insert", index, false, false);
             DEBUG_ASSERT(index != false, "Insert Fail");
@@ -452,7 +457,7 @@ struct HashMap {
         // End
         map.heap_kill();
     }
-    void test_find_cpy() {
+    static void test_find_cpy() {
         usize cap = 16;
         auto map = HashMap<int, int>::get(cap, HEAP); 
         for(int i = 0; i < cap; ++i) {
@@ -480,7 +485,7 @@ struct HashMap {
         // End
         map.heap_kill();
     }
-    void test_find_ref() {
+    static void test_find_ptr() {
         usize cap = 16;
         auto map = HashMap<int, int>::get(cap, HEAP); 
         for(int i = 0; i < cap; ++i) {
@@ -495,7 +500,7 @@ struct HashMap {
             int value = i;
             int key_mv = i;
             int value_mv = i;
-           bool index = map.insert_mv(key_mv, value_mv);
+			bool index = map.insert_ptr(&key_mv, &value_mv);
 
             TEST_NEQ("Insert", index, false, false);
             DEBUG_ASSERT(index != false, "Insert Fail");
@@ -503,7 +508,7 @@ struct HashMap {
 
         }
         for(int i = 0; i < 100'000; ++i) {
-            int *f = map.find_ref(i);
+            int *f = map.find_ptr(&i);
             DEBUG_ASSERT(f != nullptr, "AAARGHHHHHHHH");
             //printf("F: %i", *f);
         }
@@ -511,7 +516,7 @@ struct HashMap {
         // End
         map.heap_kill();
     }
-    void test_str() {
+    static void test_str() {
         usize cap = 16;
         auto map = HashMap<u64, StringBuffer>::get(cap, HEAP); 
         for(int i = 0; i < cap; ++i) {
@@ -535,14 +540,14 @@ struct HashMap {
             StringBuffer *f = map.find_cpy(key);
             StringBuffer *t = nullptr;
             DEBUG_ASSERT(f != nullptr, "AAARGHHHHHHHH");
-            TEST_STR_EQ("find_string_with_cstr_key", f->cstr(), "Word", false);
+            TEST_STR_EQ("find_string_with_cstr_key", f->as_cstr(), "Word", false);
             f->kill();
         }
 
         // End
         map.heap_kill();
     }
-    void test_iter() {
+    static void test_iter() {
         usize cap = 16;
         auto map = HashMap<int, int>::get(cap, HEAP); 
 
@@ -564,16 +569,46 @@ struct HashMap {
         // End
         map.heap_kill();
     }
-    void run_hashmap_tests() {
+	static void test_u16() {
+        usize cap = 16;
+		struct Type {
+			union {
+			u8 one;
+			u16 two;
+			};
+		};
+        auto map = HashMap<u16, Type>::get(cap, HEAP); 
+
+        for(u16 i = 0; i < 10'000; ++i) {
+			Type type;
+            map.insert_cpy(i, type);
+        }
+
+        auto iter = map.iter();
+
+        auto *kv = iter.next();
+		int count = 0;
+        while(kv) {
+			kv = iter.next();
+			++count;
+        }
+		TEST_EQ("all_items_returned", count, 10'000, false);
+
+        // End
+        map.heap_kill();
+	}
+    static void run_tests() {
         TEST_MODULE_BEGIN("HashMapModule1", true, false);
         test_cpy();
-        test_mv();
+        test_ptr();
         test_find_cpy();
-        test_find_ref();
+        test_find_ptr();
         test_str();
         test_iter();
+		test_u16();
         TEST_MODULE_END();
     }
 #endif 
+};
 
 } // namespace Sol

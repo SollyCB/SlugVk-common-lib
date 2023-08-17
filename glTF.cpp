@@ -8,6 +8,10 @@
 #include "glTF.hpp"
 #include "nlohmann/json.hpp"
 
+#if TEST
+#include "test/test.hpp"
+#endif
+
 namespace Sol {
 const int32_t GLTF_INVALID_INDEX = -1;
 const uint32_t GLTF_INVALID_COUNT = UINT32_MAX;
@@ -85,7 +89,7 @@ static bool load_array(nlohmann::json json, const char *key, Array<T> *array)
         return false;
 
     size_t size = obj.value().size();
-    array->init(size, 8);
+    array->init(size);
     return true;
 }
 template <typename T>
@@ -115,7 +119,7 @@ void glTF::Asset::fill(nlohmann::json json)
     ASSERT(asset != json.end(), "glTF has no 'asset' obj");
 
     load_string(asset.value(), "version", &version);
-    ASSERT(version.str, "glTF asset has no 'version' field");
+    ASSERT(version.data, "glTF asset has no 'version' field");
 
     load_string(asset.value(), "copyright", &copyright);
 }
@@ -239,19 +243,19 @@ void glTF::Accessor::fill(nlohmann::json json)
 
     StringBuffer tmp;
     load_string(json, "type", &tmp);
-    if (strcmp("SCALAR", tmp.cstr()) == 0)
+    if (strcmp("SCALAR", tmp.as_cstr()) == 0)
         type = SCALAR;
-    if (strcmp("VEC2", tmp.cstr()) == 0)
+    if (strcmp("VEC2", tmp.as_cstr()) == 0)
         type = VEC2;
-    if (strcmp("VEC3", tmp.cstr()) == 0)
+    if (strcmp("VEC3", tmp.as_cstr()) == 0)
         type = VEC3;
-    if (strcmp("VEC4", tmp.cstr()) == 0)
+    if (strcmp("VEC4", tmp.as_cstr()) == 0)
         type = VEC4;
-    if (strcmp("MAT2", tmp.cstr()) == 0)
+    if (strcmp("MAT2", tmp.as_cstr()) == 0)
         type = MAT2;
-    if (strcmp("MAT3", tmp.cstr()) == 0)
+    if (strcmp("MAT3", tmp.as_cstr()) == 0)
         type = MAT3;
-    if (strcmp("MAT4", tmp.cstr()) == 0)
+    if (strcmp("MAT4", tmp.as_cstr()) == 0)
         type = MAT4;
 
     load_T(json, "componentType", &component_type);
@@ -329,7 +333,7 @@ void glTF::Mesh::Primitive::fill(nlohmann::json json)
 
 void glTF::Mesh::Primitive::Target::fill(nlohmann::json json)
 {
-    attributes.init(json.size(), 8);
+    attributes.init(json.size());
     if (attributes.cap)
         fill_attrib_array(json, &attributes);
 }
@@ -396,9 +400,9 @@ void glTF::Image::fill(nlohmann::json json)
     // return without initializing StringBuffer
     StringBuffer tmp;
     if (load_string(json, "mimeType", &tmp)) {
-        if (strcmp(tmp.cstr(), "image/jpeg") == 0)
+        if (strcmp(tmp.as_cstr(), "image/jpeg") == 0)
             mime_type = JPG;
-        if (strcmp(tmp.cstr(), "image/png") == 0)
+        if (strcmp(tmp.as_cstr(), "image/png") == 0)
             mime_type = PNG;
     }
 }
@@ -436,11 +440,11 @@ void glTF::Material::fill(nlohmann::json json)
 
     StringBuffer tmp;
     load_string(json, "alphaMode", &tmp);
-    if (strcmp(tmp.cstr(), "OPAQUE") == 0)
+    if (strcmp(tmp.as_cstr(), "OPAQUE") == 0)
         alpha_mode = OPAQUE;
-    if (strcmp(tmp.cstr(), "MASK") == 0)
+    if (strcmp(tmp.as_cstr(), "MASK") == 0)
         alpha_mode = MASK;
-    if (strcmp(tmp.cstr(), "BLEND") == 0)
+    if (strcmp(tmp.as_cstr(), "BLEND") == 0)
         alpha_mode = BLEND;
 
     pbr_metallic_roughness.fill(json);
@@ -493,9 +497,9 @@ void glTF::Camera::fill(nlohmann::json json)
 
     StringBuffer tmp;
     load_string(json, "type", &tmp);
-    if (strcmp(tmp.cstr(), "perspective") == 0)
+    if (strcmp(tmp.as_cstr(), "perspective") == 0)
         type = PERSPECTIVE;
-    if (strcmp(tmp.cstr(), "orthographic") == 0)
+    if (strcmp(tmp.as_cstr(), "orthographic") == 0)
         type = ORTHO;
     ASSERT(type != UNKNOWN, "glTF model camera type must be defined");
 
@@ -556,13 +560,13 @@ void glTF::Animation::Channel::fill(nlohmann::json json)
 
     StringBuffer tmp;
     load_string(json["target"], "path", &tmp);
-    if (strcmp(tmp.cstr(), "rotation") == 0)
+    if (strcmp(tmp.as_cstr(), "rotation") == 0)
         target.path = Target::ROTATION;
-    if (strcmp(tmp.cstr(), "translation") == 0)
+    if (strcmp(tmp.as_cstr(), "translation") == 0)
         target.path = Target::TRANSLATION;
-    if (strcmp(tmp.cstr(), "scale") == 0)
+    if (strcmp(tmp.as_cstr(), "scale") == 0)
         target.path = Target::SCALE;
-    if (strcmp(tmp.cstr(), "weights") == 0)
+    if (strcmp(tmp.as_cstr(), "weights") == 0)
         target.path = Target::WEIGHTS;
 }
 void glTF::Animation::Sampler::fill(nlohmann::json json)
@@ -572,11 +576,32 @@ void glTF::Animation::Sampler::fill(nlohmann::json json)
 
     StringBuffer tmp;
     load_string(json, "interpolation", &tmp);
-    if (strcmp(tmp.cstr(), "LINEAR") == 0)
+    if (strcmp(tmp.as_cstr(), "LINEAR") == 0)
         interpolation = LINEAR;
-    if (strcmp(tmp.cstr(), "STEP") == 0)
+    if (strcmp(tmp.as_cstr(), "STEP") == 0)
         interpolation = STEP;
-    if (strcmp(tmp.cstr(), "CUBICSPLINE") == 0)
+    if (strcmp(tmp.as_cstr(), "CUBICSPLINE") == 0)
         interpolation = CUBICSPLINE;
 }
+
+#if TEST
+void test1(bool skip) {
+    glTF gltf;
+    bool ok = glTF::get("test/test_1.gltf", &gltf);
+    ASSERT(ok == true, "FAILED to read gltf file");
+    TEST_EQ("nodes[3]_translation", gltf.nodes.nodes[3].translation[0], -17.7082f, skip);
+    TEST_EQ("bufferviews[1]", gltf.buffer_views.views[1].byte_length, static_cast<uint32_t>(76768), skip);
+    TEST_EQ("accessors[0]", gltf.accessors.accessors[0].type, glTF::Accessor::VEC3, skip);
+    TEST_EQ("meshes[0].primitives[0]", gltf.meshes.meshes[0].primitives[0].indices, 21, skip);
+    TEST_STR_EQ("images[0].uri", gltf.images.images[0].uri.as_cstr(), "duckCM.png", skip);
+}
+void glTF::run_tests() {
+    TEST_MODULE_BEGIN("glTF", true, false);
+	size_t mark = SCRATCH->get_mark();
+    test1(false);
+
+	SCRATCH->cut_diff(mark);
+    TEST_MODULE_END();
+}
+#endif
 } // namespace Sol

@@ -112,7 +112,7 @@ void LinearAllocator::init(size_t size) {
   cap = size;
 }
 void *LinearAllocator::allocate(size_t size, size_t alignment) {
-  size_t pad = mem_align(size, alignment) - size;
+  size_t pad = alignment - ((size_t)(mem + alloced) & (alignment - 1)); //mem_align(size, alignment) - size;
   void* ptr = (void*)(mem + alloced + pad);
   alloced += pad + size;
   ASSERT(alloced < cap, "Linear Allocator: Overflow");

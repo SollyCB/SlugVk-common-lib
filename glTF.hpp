@@ -384,5 +384,9 @@ struct glTF {
     Materials materials;
     Cameras cameras;
     Animations animations;
+
+#if TEST
+static void run_tests(); 
+#endif
 };
 } // namespace Sol

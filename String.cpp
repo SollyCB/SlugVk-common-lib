@@ -5,12 +5,19 @@
 
 namespace Sol {
 
+size_t cstr_len(const char* str) {
+    size_t size = 0;
+    while (str[size] != '\0')
+        ++size;
+    return size;
+}
+
 // StringView ///////////////////
 void StringView::copy_to_buf(StringBuffer *buf, size_t start, size_t end)
 {
-    char *ptr = buf->str;
+    char *ptr = buf->data;
     DEBUG_ASSERT(start < end, "StringView::copy_to_buf: start > end");
-    mem_cpy(buf->str, ptr + start, end - start);
+    mem_cpy(buf->data, ptr + start, end - start);
 }
 
 // StringBuffer /////////////////
@@ -18,11 +25,26 @@ StringBuffer StringBuffer::nil() {
     StringBuffer buf;
     return buf;
 }
-StringBuffer StringBuffer::get(const char *cstr, size_t size)
+StringBuffer StringBuffer::get(const char *str) {
+    StringBuffer buf;
+	size_t size = cstr_len(str);
+    buf.init(size);
+    buf.copy_here(str, size);
+    return buf;
+}
+StringBuffer StringBuffer::get(const char *str, Allocator *alloc_) {
+    StringBuffer buf;
+	size_t size = cstr_len(str);
+    buf.init(size, alloc_);
+    buf.copy_here(str, size);
+    return buf;
+}
+
+StringBuffer StringBuffer::get(const char *str, size_t size)
 {
     StringBuffer buf;
     buf.init(size);
-    buf.copy_here(cstr, size);
+    buf.copy_here(str, size);
     return buf;
 }
 StringBuffer StringBuffer::get(std::string std_str, size_t size)
@@ -32,11 +54,11 @@ StringBuffer StringBuffer::get(std::string std_str, size_t size)
     buf.copy_here(std_str, size);
     return buf;
 }
-StringBuffer StringBuffer::get(const char *cstr, size_t size, Allocator *alloc_)
+StringBuffer StringBuffer::get(const char *str, size_t size, Allocator *alloc_)
 {
     StringBuffer buf;
     buf.init(size, alloc_);
-    buf.copy_here(cstr, size);
+    buf.copy_here(str, size);
     return buf;
 }
 StringBuffer StringBuffer::get(std::string std_str, size_t size, Allocator *alloc_)
@@ -47,71 +69,65 @@ StringBuffer StringBuffer::get(std::string std_str, size_t size, Allocator *allo
     return buf;
 }
 
-size_t StringBuffer::cstr_len(const char* cstr) {
-    size_t size = 0;
-    while (cstr[size] != '\0')
-        ++size;
-    return size;
-}
-
 void StringBuffer::init(size_t size)
 {
-    DEBUG_ASSERT(size > 0, "StringBuffer::init: size must be greater than 0");
     cap = size;
     alloc = SCRATCH;
-    str = reinterpret_cast<char*>(mem_alloca(cap + 1, 1, alloc));
+	data = reinterpret_cast<char*>(mem_alloca(cap + 1, 1, alloc));
 
-    str[len] = '\0';
+	len = 0;
+    data[len] = '\0';
 }
 void StringBuffer::init(size_t size, Allocator *alloc_)
 {
     cap = size;
     alloc = alloc_;
+    data = reinterpret_cast<char*>(mem_alloca(size + 1, 1, alloc));
 
-    str = reinterpret_cast<char*>(mem_alloca(size + 1, 1, alloc));
-    str[len] = '\0';
+	len = 0;
+    data[len] = '\0';
 }
 void StringBuffer::kill()
 {
     if (alloc == &MemoryService::instance()->system_allocator)
-        mem_free(str, alloc);
+        mem_free(data, alloc);
 }
 
 void StringBuffer::grow(size_t size)
 {
     // +1 for null byte is not in the cap
-    str = (char *)mem_realloc(size + cap + 1, len + 1, str, 1, alloc);
+    data = (char *)mem_realloc(size + cap + 1, len + 1, data, 1, alloc);
     cap += size;
     // Null byte should already be copied over
     // str[len] = '\0'; 
 }
-void StringBuffer::copy_here(const char *str_, size_t size)
+void StringBuffer::copy_here(const char *str, size_t size)
 {
-    DEBUG_ASSERT(size <=cap,  "StringBuffer::copy_here: Allocate more memory!");
+    DEBUG_ASSERT(size <= cap,  "StringBuffer::copy_here: Allocate more memory!");
 
-    mem_cpy(str, str_, size);
+    mem_cpy(data, str, size);
     len = size;
-    str[len] = '\0';
+    data[len] = '\0';
 }
 
 void StringBuffer::copy_here(std::string std_str, size_t size)
 {
     DEBUG_ASSERT(size <= cap, "StringBuffer::copy_here: Allocate more memory!");
 
-    mem_cpy((void *)str, (void *)std_str.c_str(), size);
+    mem_cpy((void *)data, (void *)std_str.c_str(), size);
     len = size;
-    str[len] = '\0';
+    data[len] = '\0';
 }
 
-void StringBuffer::push(const char *cstr)
+void StringBuffer::push(const char *str)
 {
-    size_t size = cstr_len(cstr);
+    size_t size = cstr_len(str);
 
     DEBUG_ASSERT(size <= cap - len, "StringBuffer::push: Allocate more memory (size > cap - len)!")
 
-    mem_cpy(str + len, cstr, size);
+    mem_cpy((void*)(data + len), str, size);
     len += size;
-    str[len] = '\0';
+    data[len] = '\0';
 }
 void StringBuffer::push(std::string std_str)
 {
@@ -119,20 +135,14 @@ void StringBuffer::push(std::string std_str)
 
     DEBUG_ASSERT(size <= cap - len, "StringBuffer::push: Allocate more memory (size > cap - len)!")
 
-    mem_cpy(str + len, std_str.c_str(), size);
+    mem_cpy(data + len, std_str.c_str(), size);
     len += size;
-    str[len] = '\0';
+    data[len] = '\0';
 }
 
-const char *StringBuffer::cstr()
+const char *StringBuffer::as_cstr()
 {
-#if 0 
-    if (len == 0)
-        // In case StringBuffer is for some reason uninitialized
-        return "\0";
-    else
-#endif
-    return (const char *)str;
+    return (const char *)data;
 }
 StringView StringBuffer::view(size_t start, size_t end)
 {

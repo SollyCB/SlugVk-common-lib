@@ -1,22 +1,29 @@
 #pragma once
 
-#include <cstdint>
-#include <cstddef>
-#include <vulkan/vulkan.hpp>
-
-#include "List.hpp"
+#include "Basic.hpp"
+#include "HashMap.hpp"
 #include "Allocator.hpp"
 #include "Array.hpp"
 
 namespace Sol {
 
+    // TODO: New rewrite with serialization in mind: 
+    //      Types stay the same, except for the ones which store pointers, these will 
+    //      instead store byte offsets into a buffer where each type till be copied. 
+    //      The more basic the type, the earlier in the buffer that it appears.
+
+/*
+    TODO:(Sol): These structs are all probably poorly laid out. They can definitely be better 
+    packed and aligned. But this section is not very performance critical. Eventually I want to 
+    prebake and package all the state available here. Parsing shaders at runtime is blegh
+*/
+
 struct Spv {
-    enum class Stage : uint32_t {
-        NONE,
-        VERT,
-        FRAG,
-    };
-    enum class Storage : uint32_t {
+	enum class ShaderStage : u8 {
+		VERTEX   = 0x01,
+		FRAGMENT = 0x10,
+	};
+    enum class Storage : u8 {
         UNIFORM_CONSTANT = 0,
         INPUT = 1,
         UNIFORM = 2,
@@ -25,7 +32,25 @@ struct Spv {
         IMAGE = 11,
         STORAGE_BUFFER = 12,
     };
-    enum class DecoFlagBits : uint32_t {
+    enum class Name : u8 {
+        VOID = 19,
+        BOOL = 20,
+        INT = 21,
+        FLOAT = 22,
+        VEC = 23,
+        MATRIX = 24,
+        IMAGE = 25,
+        SAMPLER = 26,
+        SAMPLED_IMAGE = 27,
+        ARRAY = 28,
+        RUNTIME_ARRAY = 29,
+        STRUCT = 30,
+        OPAQUE = 31,
+        PTR = 32,
+		FWD_PTR = 39,
+        VAR = 59,
+    };
+    enum class DecoFlagBits : u32 {
         BLOCK = 0x0001,
         ROW_MAJOR = 0x0002,
         COL_MAJOR = 0x0004,
@@ -40,64 +65,53 @@ struct Spv {
         DESC_SET = 0x0800,
         OFFSET = 0x1000,
     };
-    enum class Name : uint32_t {
-        VOID = 19,
-        BOOL = 20,
-        INT = 21,
-        FLOAT = 22,
-        VEC = 23,
-        MATRIX = 24,
-        IMAGE = 25,
-        SAMPLER = 26,
-        SAMPLED_IMAGE = 27,
-        ARRAY = 28,
-        RUNTIME_ARRAY = 29,
-        STRUCT = 30,
-        VAR = 59,
-        PTR = 32,
-		FWD_PTR = 39,
-        VAR_FINAL = 300,
-        VEC_FINAL = 301,
-        MAT_FINAL = 302,
-    };
     struct DecoInfo {
-        uint32_t flags = 0x0;
-        union {
-        uint32_t array_stride;
-        uint32_t mat_stride;
-        };
-        uint32_t location;
-        uint32_t component;
-        uint32_t binding;
-        uint32_t desc_set;
-        uint32_t offset;
+        u32 flags = 0x0;
+        u16 array_stride;
+        u16 mat_stride;
+        u16 offset;
+        u8 desc_set;
+        u8 component;
+        u8 location;
+        u8 binding; 
+        u8 member;
+        // member bit layout:
+        //      Top bit: bool (is this OpMemberDecorate or OpDecorate), 
+        //      Other 7: member index
     };
-    struct Var {
-        DecoInfo deco_info;
-        uint32_t ptr_id;
-    };
-    struct Ptr {
-        Storage storage;
-        uint32_t type_id;
-    };
-    struct Void {};
     struct Int {
-        uint32_t width;
-        bool sign;
+        u8 width_sign;
     };
     struct Float {
-        uint32_t width;
+        u8 width;
+    };
+    struct Deco {
+        u16 id;
+        DecoInfo deco_info; 
     };
     struct Vector {
-        uint32_t type_id;
-        uint32_t length;
+		u16 type_id;
+        u8 len;
     };
     struct Matrix {
-        uint32_t type_id;
-        uint32_t column_count;
+        u16 type_id;
+        u8 column_count;
+    };
+    struct Arr {
+        u16 type_id;
+        u8 len;
+    };
+    struct RuntimeArr {
+        u16 type_id;
+    };
+    struct Struct {
+        Array<u16> member_ids;
+    };
+    struct Ptr {
+        u16 type_id;
     };
     struct Image {
-        enum Dim : uint32_t {
+        enum Dim : u8 {
             D1 = 0,
             D2 = 1,
             D3 = 2,
@@ -106,17 +120,17 @@ struct Spv {
             BUFFER = 5,
             SUBPASS_DATA = 6,
         };
-        enum Depth : uint32_t {
-            NO_DEPTH = 0,
-            DEPTH = 1,
-            NEITHER = 2,
+        enum class Flags : u8 {
+			NO_DEPTH = 0x01,
+            DEPTH = 0x02,
+            NEITHER = 0x04,
+            RUN_TIME = 0x08,
+            SAMPLED = 0x10,
+            READ_WRITE = 0x20,
+            ARRAYED  = 0x40,
+            MULTI_SAMPLED = 0x80,
         };
-        enum Sampled : uint32_t {
-            RUN_TIME = 0,
-            SAMPLING = 1,
-            READ_WRITE = 2,
-        };
-        enum Format : uint32_t {
+        enum Format : u8 {
             Unknown = 0,
             Rgba32f = 1,
             Rgba16f = 2,
@@ -160,85 +174,68 @@ struct Spv {
             R64ui = 40,
             R64i = 41,
         };
-        uint32_t type_id;
         Dim dim;
-        Depth depth;
-        bool array;
-        bool multisampled;
-        Sampled sampled;
-        Format format;
+        Format fmt;
+		u16 type_id;
+        u8 flags;
     };
     struct SampledImage {
-        uint32_t type_id;
-    };
-    struct Arr {
-        uint32_t type_id;
-        uint32_t length;
-    };
-    struct RunTimeArray {
-        uint32_t type_id;
-    };
-    struct Struct {
-        Array<uint32_t> type_ids;
+        u16 type_id;
     };
     struct Type {
-        uint32_t id;
         Name name;
         union {
-            Var var;
-            Ptr ptr;
-            Void empty;
             Int integer;
-            Float floating_point;
-            Vector vector;
+            Float flp;
+            Vector vec;
             Matrix matrix;
             Image image;
-            SampledImage sampledimage;
+            SampledImage sampled_image;
             Arr arr;
-            RunTimeArray runtimearray;
+            RuntimeArr runtime_arr;
             Struct structure;
+            Ptr ptr;
         };
     };
-    VkShaderStageFlagBits stage;
-    const char* p_name = nullptr;
-    List<Type> types;
+	struct Var {
+		Storage storage;
+		u16 type_id;
+	};
+    cstr p_name;
+    ShaderStage stage;
+	HashMap<u16, Var> vars;
+	HashMap<u16, Type> types;
+	HashMap<u16, DecoInfo> decorations;
+	HashMap<u16, DecoInfo> member_decorations;
 
-    static Spv parse(size_t code_size, const uint32_t *spirv, bool *ok);
+    static Spv parse(usize code_size, const u32 *spirv, bool *ok);
+
+	struct Serialized {
+		// Heavily simplify Spv:
+		//	report only the information necessary for creating the 
+		//	Pipeline layout / desc buffers, e.g. memory type, is it arrayed...
+	};
+	// Store the info in manner better facilitating file io, store data size for offsets
+	Serialized serialize();
+	static void write(cstr filename, u32 count, Serialized *infos);
+
+	// @Dangerous @PoorName
+	// This function should really never be called, as it will be exclusively 
+	// used in pipeline state creation, and that can do the scratch deallocation 
 	void kill();
 
 private:
-    enum class Deco : uint32_t {
-        BLOCK = 2,
-        ROW_MAJOR = 4,
-        COL_MAJOR = 5,
-        ARRAY_STRIDE = 6,
-        MAT_STRIDE = 7,
-        BUILTIN = 11,
-        CONSTANT = 22,
-        UNIFORM = 26,
-        LOCATION = 30,
-        COMPONENT = 31,
-        BINDING = 33,
-        DESC_SET = 34,
-        OFFSET = 35,
-    };
     size_t scratch_mark = 0;
-
-    Type* get_type(uint32_t id, Spv::Name name); 
-    inline void new_optype(const uint32_t *instr, Type *type, Spv::Name name) {
-        type->id = *(instr + 1);
-        type->name = name;
-    }
-
 
 #if DEBUG
 public:
-    struct DebugInfo {
-        uint32_t id;
-        const char *name;
-    };
-    List<DebugInfo> debug;
+    HashMap<u16, StringBuffer> debug;
+#endif
+
+#if TEST
+    static void run_tests();
 #endif
 };
+
 
 } // namespace Sol

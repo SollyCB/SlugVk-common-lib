@@ -47,10 +47,10 @@ add_library(SlugVk-lib-common
     Clock.cpp
     CMakeLists.txt
     File.cpp
-    glTF.cpp
+	glTF.cpp
     Image.cpp
     QuartCamera.cpp
-    Spv.cpp
+	Spv.cpp
     String.cpp
     VulkanErrors.cpp
     Window.cpp
@@ -63,12 +63,12 @@ target_link_libraries(SlugVk-lib-common PUBLIC "${LINK_FLAGS_SLUGVK_COMMON}")
 
 if (BUILD_TESTS)
     message("Building TESTS...")
+    add_compile_definitions(TEST=true)
 
     add_executable(SlugVk-lib-common-TestAll
         test/test_entrypoint.cpp
         test/test.cpp
-        test/spv_test.cpp
-        test/gltf_test.cpp
+        #test/gltf_test.cpp
     )
     target_include_directories(SlugVk-lib-common-TestAll PRIVATE .)
     target_compile_options(SlugVk-lib-common-TestAll PRIVATE "${COMPILE_FLAGS_SLUGVK_COMMON}")

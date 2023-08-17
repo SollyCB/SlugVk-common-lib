@@ -13,7 +13,7 @@ static void module_begin_msg(const char* module_name,
     if (skippable) {
         std::cout << GREEN << "ENABLED" << NC;
         if (!global_skip)
-            std::cout << ", (" << RED << "DISABLED GLOBALLY" << NC << "):\n";
+            std::cout << " (" << RED << "DISABLED GLOBALLY" << NC << "):\n";
         else
             std::cout << ":\n";
     }

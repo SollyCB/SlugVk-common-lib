@@ -1,7 +1,8 @@
 #include "test.hpp"
 #include "Allocator.hpp"
-//#include "new_spv.hpp"
+#include "Spv.hpp"
 #include "HashMap.hpp"
+#include "glTF.hpp"
 
 using namespace Sol;
 
@@ -10,12 +11,9 @@ int main() {
     MemoryService::instance()->init(&config);
     Test::Suite::instance()->init(false);
 
-    //Spv spv;
-    ///spv.run_tests();
-    //glTFTest gltf;
-    //gltf.run_tests();
-    run_hashmap_tests();
-
+	HashMap<int, int>::run_tests();
+	Spv::run_tests();
+	glTF::run_tests();
 
     Test::Suite::instance()->kill();
     MemoryService::instance()->shutdown();
