@@ -1,6 +1,5 @@
 #include "String.hpp"
 #include "Allocator.hpp"
-#include "VulkanErrors.hpp"
 #include "Assert.hpp"
 
 namespace Sol {

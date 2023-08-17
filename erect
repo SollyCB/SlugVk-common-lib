@@ -1,0 +1,14 @@
+#!/usr/bin/bash
+
+set -xe
+
+cmake="cmake . -B build -DBUILD_TESTS=ON -DBUILD_DEBUG=ON"
+build="cmake --build build"
+run_tests="./build/SlugVk-lib-common-TestAll"
+
+$cmake
+$build
+
+if [[ $1 == "run" ]]; then
+	$run_tests
+fi

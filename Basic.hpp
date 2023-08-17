@@ -1,8 +1,12 @@
 #include "Allocator.hpp"
 #include "Assert.hpp"
+#include "Array.hpp"
+#include "HashMap.hpp"
+#include "String.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 
 typedef const char*   cstr;
 typedef unsigned char uchar;

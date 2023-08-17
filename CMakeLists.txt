@@ -52,7 +52,6 @@ add_library(SlugVk-lib-common
     QuartCamera.cpp
 	Spv.cpp
     String.cpp
-    VulkanErrors.cpp
     Window.cpp
 
     external/tlsf.cpp
@@ -68,7 +67,6 @@ if (BUILD_TESTS)
     add_executable(SlugVk-lib-common-TestAll
         test/test_entrypoint.cpp
         test/test.cpp
-        #test/gltf_test.cpp
     )
     target_include_directories(SlugVk-lib-common-TestAll PRIVATE .)
     target_compile_options(SlugVk-lib-common-TestAll PRIVATE "${COMPILE_FLAGS_SLUGVK_COMMON}")

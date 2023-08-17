@@ -19,6 +19,7 @@ static Array<T> get(size_t size) {
 }
 void init(size_t size) {
     cap = size;
+	len = 0;
     data = (T*)(lin_alloc(size * sizeof(T)));
 }
 void empty() {
@@ -59,10 +60,6 @@ struct DynArray {
 	size_t cap = 0;
 	T* data = nullptr;
 
-	// @Incomplete Never uses a linear allocator as it has to be able to grow...
-	// If scratch allocation is preferred, use the Array<T> type
-    // (Growing would cause bad fragmentation in the linear allocator, this may be fine in certain 
-    // cases, for instance where the whole or lots of the allocator are freed. If I run into such cases this api will change.)
     static DynArray get(size_t cap_) {
         DynArray ret;
         ret.init(cap_);
@@ -120,34 +117,39 @@ struct DynArray {
         return data + len - 1;
     }
 	void resize(size_t size) {
-        cap = size;
         T* old_data = data;
-        data = heap_alloc(cap * sizeof(T));
+
+        cap = size;
+        data = (T*)heap_alloc(cap * sizeof(T));
         len = len > cap ? cap : len;
-        mem_cpy(data, old_data, len);
+
+        mem_cpy(data, old_data, len * sizeof(T));
         heap_free(old_data);
 	}
 	void grow(size_t size) {
-        if (size < cap)
+        if (size <= cap)
             return;
-        cap = size;
+
+        cap += size;
         T* old_data = data;
-        data = heap_alloc(cap * sizeof(T));
-        mem_cpy(data, old_data, len);
+        data = (T*)heap_alloc(cap * sizeof(T));
+
+        mem_cpy(data, old_data, len * sizeof(T));
         heap_free(old_data);
 	}
 	void grow() {
         cap *= 2;
         T* old_data = data;
-        data = heap_alloc(cap * sizeof(T));
-        mem_cpy(data, old_data, len);
+        data = (T*)heap_alloc(cap * sizeof(T));
+
+        mem_cpy(data, old_data, len * sizeof(T));
         heap_free(old_data);
 	}
 	T* last() {
 		return &data[len - 1];
 	}
 	T& operator[](size_t i) {
-        DEBUG_ASSERT(i < cap, "OUT OF BOUNDS ACCESS ON DynArray");
+        DEBUG_ASSERT(i < len, "OUT OF BOUNDS ACCESS ON DynArray");
 		return data[i];
 	}
 };

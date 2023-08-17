@@ -4,7 +4,6 @@
 #include <iostream>
 #include <string>
 
-#include "VulkanErrors.hpp"
 #include "glTF.hpp"
 #include "nlohmann/json.hpp"
 

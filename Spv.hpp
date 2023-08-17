@@ -1,9 +1,6 @@
 #pragma once
 
 #include "Basic.hpp"
-#include "HashMap.hpp"
-#include "Allocator.hpp"
-#include "Array.hpp"
 
 namespace Sol {
 

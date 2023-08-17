@@ -1,5 +1,4 @@
 #include "Image.hpp"
-#include "VulkanErrors.hpp"
 #include "Assert.hpp"
 #include "stb_image.h"
 
