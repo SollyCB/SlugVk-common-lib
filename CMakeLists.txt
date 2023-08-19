@@ -55,6 +55,8 @@ add_library(SlugVk-lib-common
     Window.cpp
 
     external/tlsf.cpp
+    external/stb_image.cpp
+    external/stb_sprintf.cpp
 )
 target_include_directories(SlugVk-lib-common PUBLIC . ./external ./external/nlohmann)
 target_compile_options(SlugVk-lib-common PUBLIC "${COMPILE_FLAGS_SLUGVK_COMMON}")

@@ -597,6 +597,21 @@ struct HashMap {
         // End
         map.heap_kill();
 	}
+    static void test_nofind() {
+        u16 cap = 100;
+        auto map = HashMap<int, int>::get(cap, HEAP); 
+
+        for(u16 i = 0; i < 10'000; ++i) {
+            map.insert_cpy(i, i);
+        }
+
+        int *found = map.find_cpy(10'001);
+        int *null = nullptr;
+		TEST_EQ("Not_Found", found, null, false);
+
+        // End
+        map.heap_kill();
+    }
     static void run_tests() {
         TEST_MODULE_BEGIN("HashMapModule1", true, false);
         test_cpy();
@@ -606,6 +621,7 @@ struct HashMap {
         test_str();
         test_iter();
 		test_u16();
+        test_nofind();
         TEST_MODULE_END();
     }
 #endif 
